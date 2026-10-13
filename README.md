@@ -31,6 +31,9 @@ guarantees it is unique across an install.
   // Source asset type, taken from the file extension: "consumable",
   // "object", "matitem", "sword", "head", and so on.
   "type": "string",
+  // Asset-relative path of the defining file,
+  // e.g. "items/generic/food/tomatojuice.consumable".
+  "sourceFile": "string",
   // Display name. Not unique, may be missing.
   "shortdescription": "string?",
   "description": "string?",
@@ -43,14 +46,69 @@ guarantees it is unique across an install.
   "inventoryIcon": "string?",
   "price": "integer?",
   "maxStack": "integer?",
+  // Item level, present on armor and weapons.
+  "level": "integer?",
+  // Weapons and tools only.
+  "twoHanded": "boolean?",
+  // The engine's hint for which tooltip layout to use, e.g. "base",
+  // "object", "container", "armor", "food".
+  "tooltipKind": "string?",
   // Per-item tags from the asset file, e.g. ["weapon", "ranged"].
   "itemTags": "string[]",
-  // Colony tags, present on objects only, e.g. ["crafting", "electronic"].
-  "colonyTags": "string[]",
   // Recipes taught by picking this item up, as item names.
   "learnBlueprintsOnPickup": "string[]",
-  // Derived at generation time from shortdescription.
-  "wikiUrl": "string?"
+  // Collection entries unlocked by picking this item up, as a map of
+  // collection name to collectable id, e.g. { "fossils": "fossil_1" }.
+  "collectablesOnPickup": "Record<string, string>",
+
+  // Object-only fields (type is "object").
+  // Finer-grained kind, e.g. "object", "container", "farmable",
+  // "loungeable", "teleporter".
+  "objectType": "string?",
+  // Racial style, e.g. "apex", "floran". The engine defaults to "generic".
+  "race": "string?",
+  // Colony tags, e.g. ["crafting", "electronic"].
+  "colonyTags": "string[]",
+  // Whether the object can be scanned into the player's log.
+  "scannable": "boolean?",
+  // Whether the object appears in the Pixel Printer.
+  "printable": "boolean?",
+
+  // Derived at generation time.
+  // Item names of the ingredients across every recipe that produces
+  // this item. Empty when the item is not craftable.
+  "craftedFrom": "string[]",
+  // Item names of everything this item is an ingredient for.
+  "usedIn": "string[]",
+  // Derived from shortdescription.
+  "wikiUrl": "string?",
+  // The unmodified asset JSON. Used by the /spawnitem generator to
+  // diff a user's edits into the command's parameters argument.
+  // Loaded on demand, not part of the search index.
+  "raw": "object"
+}
+```
+
+## Recipe Schema
+
+Recipes live in a separate table next to the item records. The item record's
+`craftedFrom` and `usedIn` lists are derived from this table and serve search.
+The table serves the detail view, where counts, stations and multiple recipes
+per item matter. Field names follow the game's `.recipe` files.
+
+```jsonc
+{
+  // Generator-assigned, e.g. the asset-relative path of the .recipe file.
+  "id": "string",
+  "input": [{ "item": "string", "count": "integer" }],
+  "output": { "item": "string", "count": "integer" },
+  // Currency costs, as a map of currency name to amount,
+  // e.g. { "money": 500 }.
+  "currencyInputs": "Record<string, integer>",
+  // Crafting station groups, e.g. ["craftingfurnace", "plain"].
+  "groups": "string[]",
+  // Crafting time in seconds. Falls back to the engine default when absent.
+  "duration": "number?"
 }
 ```
 

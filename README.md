@@ -105,7 +105,9 @@ Asset files are JSON with comments, trailing commas, and raw newlines inside
 strings, so the script normalizes them before parsing with `comment-json`.
 Duplicate item names, parse failures, missing `requires` sources and unresolved
 icons or recipe references are reported as warnings. Sprite-sheet icons with a
-frame suffix are copied whole; cropping to the named frame is not handled yet.
+frame suffix (`icons.png:chest`) are cropped to that frame, using the nearest
+`<name>.frames` or `default.frames` the way the engine does, and written next to
+the sheet as `<name>.<frame>.png`.
 
 ## Item Schema
 

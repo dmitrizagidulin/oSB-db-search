@@ -22,11 +22,13 @@ function facetLink(facet: FacetKey, value: string) {
 function ItemRef({
   db,
   name,
-  count
+  count,
+  size = 24
 }: {
   db: Db
   name: string
   count?: number
+  size?: number
 }) {
   const item = db.byName.get(name)
   if (!item) {
@@ -38,7 +40,7 @@ function ItemRef({
   }
   return (
     <a className="ref" href={itemHash(name)} title={name}>
-      <ItemIcon item={item} size={24} />
+      <ItemIcon item={item} size={size} />
       {count !== undefined && <b>{count}x</b>}
       <span className={rarityClass(item.rarity)}>{displayName(item)}</span>
     </a>
@@ -70,6 +72,84 @@ function RecipeRow({ db, recipe }: { db: Db; recipe: Recipe }) {
             </span>
           ))}
       </span>
+    </li>
+  )
+}
+
+function UsedInRow({
+  db,
+  recipe,
+  itemName
+}: {
+  db: Db
+  recipe: Recipe
+  itemName: string
+}) {
+  const [open, setOpen] = useState(false)
+  const self = recipe.input.find(i => i.item === itemName)
+  const others = recipe.input.filter(i => i.item !== itemName)
+  const currency = Object.entries(recipe.currencyInputs)
+  const hasOthers = others.length > 0 || currency.length > 0
+  return (
+    <li className="recipe used-in">
+      <span className="used-in-head">
+        <button
+          type="button"
+          className="chevron"
+          aria-expanded={open}
+          aria-label={
+            open ? 'Hide other ingredients' : 'Show other ingredients'
+          }
+          disabled={!hasOthers}
+          title={hasOthers ? undefined : 'No other ingredients'}
+          onClick={() => setOpen(o => !o)}
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path
+              d="M5 3l5 5-5 5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        <ItemRef
+          db={db}
+          name={recipe.output.item}
+          count={recipe.output.count}
+          size={48}
+        />
+        {self && self.count > 1 && (
+          <span className="muted">uses {self.count}x</span>
+        )}
+        <span className="recipe-groups">
+          {recipe.groups
+            .filter(g => g !== 'all')
+            .map(g => (
+              <span key={g} className="tag">
+                {g}
+              </span>
+            ))}
+        </span>
+      </span>
+      {open && hasOthers && (
+        <ul className="ingredients">
+          {others.map(i => (
+            <li key={i.item}>
+              <ItemRef db={db} name={i.item} count={i.count} size={32} />
+            </li>
+          ))}
+          {currency.map(([name, amount]) => (
+            <li key={name}>
+              <span className="ref">
+                <b>{amount}</b> {name}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </li>
   )
 }
@@ -109,15 +189,15 @@ type RecipesState =
   | { status: 'ready'; recipes: Recipe[] }
 
 function RecipeList({
-  db,
   state,
   pick,
-  emptyText
+  emptyText,
+  row
 }: {
-  db: Db
   state: RecipesState
   pick: (recipe: Recipe) => boolean
   emptyText: string
+  row: (recipe: Recipe) => React.ReactNode
 }) {
   if (state.status === 'loading') {
     return <p className="muted">Loading recipes...</p>
@@ -129,13 +209,7 @@ function RecipeList({
   if (recipes.length === 0) {
     return <p className="muted">{emptyText}</p>
   }
-  return (
-    <ul className="recipes">
-      {recipes.map(r => (
-        <RecipeRow key={r.id} db={db} recipe={r} />
-      ))}
-    </ul>
-  )
+  return <ul className="recipes">{recipes.map(row)}</ul>
 }
 
 export function ItemDetail({ db, item }: { db: Db; item: Item }) {
@@ -241,20 +315,27 @@ export function ItemDetail({ db, item }: { db: Db; item: Item }) {
         <section>
           <h2>Crafted from</h2>
           <RecipeList
-            db={db}
             state={state}
             pick={r => r.output.item === item.itemName}
             emptyText="Not craftable."
+            row={r => <RecipeRow key={r.id} db={db} recipe={r} />}
           />
         </section>
 
         <section>
           <h2>Used in</h2>
           <RecipeList
-            db={db}
             state={state}
             pick={r => r.input.some(i => i.item === item.itemName)}
             emptyText="Not an ingredient in any recipe."
+            row={r => (
+              <UsedInRow
+                key={r.id}
+                db={db}
+                recipe={r}
+                itemName={item.itemName}
+              />
+            )}
           />
         </section>
 

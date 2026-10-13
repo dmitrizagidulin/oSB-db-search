@@ -24,6 +24,7 @@ import {
 } from 'node:fs'
 import { basename, dirname, join, posix, relative, sep } from 'node:path'
 import { parse } from 'comment-json'
+import { PNG } from 'pngjs'
 import type { Item, Rarity, Recipe, Source } from '../src/schema.ts'
 
 // Item asset extensions the engine's ItemDatabase recognizes, plus .object
@@ -263,13 +264,65 @@ function resolveAssetPath(ref: string, file: string): string {
   return posix.join(posix.dirname(file), ref)
 }
 
-// inventoryIcon is a path string, possibly with a ":frame" suffix, or an
-// array of drawables each with an "image" key. Frame suffixes are dropped;
-// cropping sprite sheets to the named frame is not handled yet. Returns the
-// icon's indexed asset (lookups are case-insensitive, e.g. "icons.png" in a
-// config and "Icons.png" on disk), or undefined with a warning if no source
-// has it.
-function resolveIcon(value: unknown, file: string): Asset | undefined {
+// A frame rectangle in a sprite sheet: [x1, y1, x2, y2], as .frames files
+// list them.
+type FrameRect = [number, number, number, number]
+
+// Reads the frame table for an image the way the engine does: the nearest
+// "<name>.frames" or "default.frames" in the image's directory or any
+// parent. Grid-defined frames get the names in the file's "names" table,
+// falling back to their row-major index. Aliases resolve to their targets.
+function frameTable(imagePath: string): Map<string, FrameRect> | undefined {
+  const name = posix.basename(imagePath).replace(/\.[^.]*$/, '')
+  let dir = posix.dirname(imagePath)
+  let framesPath: string | undefined
+  for (;;) {
+    const candidates = [`${name}.frames`, 'default.frames'].map(f =>
+      dir === '.' ? f : posix.join(dir, f)
+    )
+    framesPath = candidates.find(findAsset)
+    if (framesPath || dir === '.') {
+      break
+    }
+    dir = posix.dirname(dir)
+  }
+  if (!framesPath) {
+    return undefined
+  }
+  const config = readAssetJson(framesPath)
+  const frames = new Map<string, FrameRect>()
+  const grid = config.frameGrid
+  if (grid) {
+    const [w, h] = grid.size
+    const [cols, rows] = grid.dimensions
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const frameName = grid.names?.[r]?.[c] ?? String(r * cols + c)
+        frames.set(frameName, [c * w, r * h, (c + 1) * w, (r + 1) * h])
+      }
+    }
+  }
+  for (const [frameName, rect] of Object.entries(config.frameList ?? {})) {
+    frames.set(frameName, rect as FrameRect)
+  }
+  for (const [alias, target] of Object.entries(config.aliases ?? {})) {
+    const rect = frames.get(target as string)
+    if (rect) {
+      frames.set(alias, rect)
+    }
+  }
+  return frames
+}
+
+// inventoryIcon is a path string, possibly with a ":frame" suffix and
+// "?directives", or an array of drawables each with an "image" key. Returns
+// the icon's indexed asset (lookups are case-insensitive, e.g. "icons.png"
+// in a config and "Icons.png" on disk) and the frame name if one was given,
+// or undefined with a warning if no source has it.
+function resolveIcon(
+  value: unknown,
+  file: string
+): { asset: Asset; frame?: string } | undefined {
   let ref: unknown = value
   if (Array.isArray(value)) {
     ref = value.at(-1)?.image
@@ -280,22 +333,46 @@ function resolveIcon(value: unknown, file: string): Asset | undefined {
     }
     return undefined
   }
-  const [path] = ref.split(':')
+  const [path, frame] = ref.split('?')[0].split(':')
   const assetPath = resolveAssetPath(path, file)
-  const found = findAsset(assetPath)
-  if (!found) {
+  const asset = findAsset(assetPath)
+  if (!asset) {
     warn(file, `icon not found: ${assetPath}`)
+    return undefined
   }
-  return found
+  return { asset, frame: frame || undefined }
 }
 
-function copyIcon(icon: Asset) {
-  const dest = join(outDir, 'assets', icon.path)
+// Writes the icon PNG under public/assets and returns its asset path. A
+// sprite sheet with a named frame is cropped to that frame and written next
+// to the sheet as "<name>.<frame>.png"; if the frame cannot be resolved the
+// whole sheet is used, with a warning.
+function copyIcon(icon: Asset, frame: string | undefined, file: string) {
+  let path = icon.path
+  let rect: FrameRect | undefined
+  if (frame) {
+    rect = frameTable(icon.path)?.get(frame)
+    if (rect) {
+      path = icon.path.replace(/\.png$/i, `.${frame}.png`)
+    } else {
+      warn(file, `icon frame not found: ${icon.path}:${frame}`)
+    }
+  }
+  const dest = join(outDir, 'assets', path)
   if (existsSync(dest)) {
-    return
+    return path
   }
   mkdirSync(dirname(dest), { recursive: true })
-  copyFileSync(icon.file, dest)
+  if (!rect) {
+    copyFileSync(icon.file, dest)
+    return path
+  }
+  const sheet = PNG.sync.read(readFileSync(icon.file))
+  const [x1, y1, x2, y2] = rect
+  const out = new PNG({ width: x2 - x1, height: y2 - y1 })
+  PNG.bitblt(sheet, out, x1, y1, out.width, out.height, 0, 0)
+  writeFileSync(dest, PNG.sync.write(out))
+  return path
 }
 
 // learnBlueprintsOnPickup entries are item descriptors: either a bare item
@@ -380,9 +457,7 @@ function buildItem(
   const shortdescription = optional<string>(config.shortdescription, 'string')
   const cleanName = shortdescription && stripColorCodes(shortdescription)
   const icon = resolveIcon(config.inventoryIcon, file)
-  if (icon) {
-    copyIcon(icon)
-  }
+  const iconPath = icon && copyIcon(icon.asset, icon.frame, file)
 
   const item: Item = {
     itemName,
@@ -393,7 +468,7 @@ function buildItem(
     description: optional<string>(config.description, 'string'),
     category: optional<string>(config.category, 'string'),
     rarity: normalizeRarity(config.rarity, file),
-    inventoryIcon: icon?.path,
+    inventoryIcon: iconPath,
     price: optional<number>(config.price, 'number'),
     maxStack: optional<number>(config.maxStack, 'number'),
     level: optional<number>(config.level, 'number'),

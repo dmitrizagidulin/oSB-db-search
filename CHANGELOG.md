@@ -29,3 +29,8 @@
   routing keeps query and filters in the URL. Search runs in the browser over
   `items.json` with MiniSearch (prefix, fuzzy, field boosts). Recipes load on
   the first detail view.
+- Item detail "Used in" rows show the product card with a chevron that expands
+  the other ingredients; the chevron is disabled for single-ingredient recipes.
+- Generator crops sprite-sheet icons to their named frame (via the engine's
+  `.frames` lookup) and writes them as `<name>.<frame>.png`, so armor icons no
+  longer show the whole head/chest/pants strip.

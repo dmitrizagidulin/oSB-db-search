@@ -7,14 +7,17 @@ import {
   FACETS,
   SORTS,
   isBlank,
-  replaceRoute,
+  replaceSearch,
   searchHash,
   withFilter,
   type FacetKey,
+  type Filters,
   type SearchQuery,
   type SortKey
 } from './route.ts'
-import type { Item } from './schema.ts'
+import type { Item, Rarity } from './schema.ts'
+
+const collator = new Intl.Collator()
 
 const PAGE = 60
 
@@ -26,24 +29,20 @@ const FACET_LABELS: Record<FacetKey, string> = {
   source: 'Source'
 }
 
-function facetValue(item: Item, facet: FacetKey): string | undefined {
-  return item[facet]
-}
-
-function matches(item: Item, query: SearchQuery, skip?: FacetKey): boolean {
+function matches(item: Item, filters: Filters, skip?: FacetKey): boolean {
   return FACETS.every(f => {
-    if (f === skip || query.filters[f].length === 0) {
+    if (f === skip || filters[f].length === 0) {
       return true
     }
-    const v = facetValue(item, f)
-    return v !== undefined && query.filters[f].includes(v)
+    const v = item[f]
+    return v !== undefined && filters[f].includes(v)
   })
 }
 
 function countBy(items: Item[], facet: FacetKey): [string, number][] {
   const counts = new Map<string, number>()
   for (const item of items) {
-    const v = facetValue(item, facet)
+    const v = item[facet]
     if (v !== undefined) {
       counts.set(v, (counts.get(v) ?? 0) + 1)
     }
@@ -52,23 +51,26 @@ function countBy(items: Item[], facet: FacetKey): [string, number][] {
   if (facet === 'rarity') {
     return entries.sort(
       (a, b) =>
-        RARITY_ORDER.indexOf(a[0] as never) -
-        RARITY_ORDER.indexOf(b[0] as never)
+        RARITY_ORDER.indexOf(a[0] as Rarity) -
+        RARITY_ORDER.indexOf(b[0] as Rarity)
     )
   }
-  return entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  return entries.sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0]))
 }
 
 function sortItems(items: Item[], sort: SortKey): Item[] {
+  if (sort === 'relevance') {
+    return items
+  }
   const by = {
-    relevance: () => 0,
-    name: (a: Item, b: Item) => displayName(a).localeCompare(displayName(b)),
+    name: (a: Item, b: Item) =>
+      collator.compare(displayName(a), displayName(b)),
     rarity: (a: Item, b: Item) =>
       RARITY_ORDER.indexOf(b.rarity) - RARITY_ORDER.indexOf(a.rarity),
     price: (a: Item, b: Item) => (b.price ?? -1) - (a.price ?? -1),
     level: (a: Item, b: Item) => (b.level ?? -1) - (a.level ?? -1)
   }[sort]
-  return sort === 'relevance' ? items : [...items].sort(by)
+  return [...items].sort(by)
 }
 
 export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
@@ -110,10 +112,10 @@ export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
   const results = useMemo(
     () =>
       sortItems(
-        hits.filter(i => matches(i, query)),
+        hits.filter(i => matches(i, query.filters)),
         query.sort
       ),
-    [hits, query]
+    [hits, query.filters, query.sort]
   )
 
   // Counts for a facet ignore that facet's own selection, so unselected
@@ -124,16 +126,13 @@ export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
         FACETS.map(f => [
           f,
           countBy(
-            hits.filter(i => matches(i, query, f)),
+            hits.filter(i => matches(i, query.filters, f)),
             f
           )
         ])
       ) as Record<FacetKey, [string, number][]>,
-    [hits, query]
+    [hits, query.filters]
   )
-
-  const update = (next: SearchQuery) =>
-    replaceRoute({ page: 'search', query: next })
 
   const chipCounts = useMemo(
     () => ({
@@ -170,7 +169,7 @@ export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
           value={text}
           onChange={e => {
             setText(e.target.value)
-            update({ ...query, q: e.target.value })
+            replaceSearch({ ...query, q: e.target.value })
           }}
         />
         {!blank && (
@@ -204,7 +203,7 @@ export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
               <select
                 value={query.sort}
                 onChange={e =>
-                  update({ ...query, sort: e.target.value as SortKey })
+                  replaceSearch({ ...query, sort: e.target.value as SortKey })
                 }
               >
                 {SORTS.map(s => (
@@ -229,7 +228,9 @@ export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
                           <input
                             type="checkbox"
                             checked={query.filters[f].includes(v)}
-                            onChange={() => update(withFilter(query, f, v))}
+                            onChange={() =>
+                              replaceSearch(withFilter(query, f, v))
+                            }
                           />
                           <span className="facet-value">{v}</span>
                           <span className="count">{n}</span>

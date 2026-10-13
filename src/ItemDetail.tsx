@@ -3,14 +3,19 @@ import type { Db } from './data.ts'
 import { displayName, loadRecipes } from './data.ts'
 import { ItemIcon } from './ItemIcon.tsx'
 import { rarityClass } from './rarity.ts'
-import { emptyFilters, itemHash, searchHash, type FacetKey } from './route.ts'
+import {
+  emptyFilters,
+  emptyQuery,
+  itemHash,
+  searchHash,
+  type FacetKey
+} from './route.ts'
 import type { Item, Recipe } from './schema.ts'
 
 function facetLink(facet: FacetKey, value: string) {
   return searchHash({
-    q: '',
-    filters: { ...emptyFilters(), [facet]: [value] },
-    sort: 'relevance'
+    ...emptyQuery(),
+    filters: { ...emptyFilters(), [facet]: [value] }
   })
 }
 
@@ -76,12 +81,11 @@ function Fact({
   label: string
   children: React.ReactNode
 }) {
-  if (
-    children === undefined ||
-    children === null ||
-    children === false ||
-    children === ''
-  ) {
+  // Hides facts with nothing to show; 0 is still a value.
+  const empty = Array.isArray(children)
+    ? children.length === 0
+    : !children && children !== 0
+  if (empty) {
     return null
   }
   return (
@@ -107,12 +111,12 @@ type RecipesState =
 function RecipeList({
   db,
   state,
-  recipes,
+  pick,
   emptyText
 }: {
   db: Db
   state: RecipesState
-  recipes: Recipe[]
+  pick: (recipe: Recipe) => boolean
   emptyText: string
 }) {
   if (state.status === 'loading') {
@@ -121,6 +125,7 @@ function RecipeList({
   if (state.status === 'error') {
     return <p className="muted">Could not load recipes: {state.message}</p>
   }
+  const recipes = state.recipes.filter(pick)
   if (recipes.length === 0) {
     return <p className="muted">{emptyText}</p>
   }
@@ -146,11 +151,6 @@ export function ItemDetail({ db, item }: { db: Db; item: Item }) {
     }
   }, [])
 
-  const recipes = state.status === 'ready' ? state.recipes : []
-  const craftedFrom = recipes.filter(r => r.output.item === item.itemName)
-  const usedIn = recipes.filter(r =>
-    r.input.some(i => i.item === item.itemName)
-  )
   const collectables = Object.entries(item.collectablesOnPickup)
 
   return (
@@ -210,38 +210,30 @@ export function ItemDetail({ db, item }: { db: Db; item: Item }) {
             <Fact label="Scannable">{yesNo(item.scannable)}</Fact>
             <Fact label="Printable">{yesNo(item.printable)}</Fact>
             <Fact label="Tags">
-              {item.itemTags.length > 0 &&
-                item.itemTags.map(t => (
-                  <a
-                    key={t}
-                    className="tag"
-                    href={searchHash({
-                      q: t,
-                      filters: emptyFilters(),
-                      sort: 'relevance'
-                    })}
-                  >
-                    {t}
-                  </a>
-                ))}
+              {item.itemTags.map(t => (
+                <a
+                  key={t}
+                  className="tag"
+                  href={searchHash({ ...emptyQuery(), q: t })}
+                >
+                  {t}
+                </a>
+              ))}
             </Fact>
             <Fact label="Colony tags">
-              {item.colonyTags.length > 0 &&
-                item.colonyTags.map(t => (
-                  <span key={t} className="tag">
-                    {t}
-                  </span>
-                ))}
+              {item.colonyTags.map(t => (
+                <span key={t} className="tag">
+                  {t}
+                </span>
+              ))}
             </Fact>
             <Fact label="Teaches">
-              {item.learnBlueprintsOnPickup.length > 0 &&
-                item.learnBlueprintsOnPickup.map(n => (
-                  <ItemRef key={n} db={db} name={n} />
-                ))}
+              {item.learnBlueprintsOnPickup.map(n => (
+                <ItemRef key={n} db={db} name={n} />
+              ))}
             </Fact>
             <Fact label="Collectable">
-              {collectables.length > 0 &&
-                collectables.map(([c, id]) => `${c}: ${id}`).join(', ')}
+              {collectables.map(([c, id]) => `${c}: ${id}`).join(', ')}
             </Fact>
           </dl>
         </section>
@@ -251,7 +243,7 @@ export function ItemDetail({ db, item }: { db: Db; item: Item }) {
           <RecipeList
             db={db}
             state={state}
-            recipes={craftedFrom}
+            pick={r => r.output.item === item.itemName}
             emptyText="Not craftable."
           />
         </section>
@@ -261,7 +253,7 @@ export function ItemDetail({ db, item }: { db: Db; item: Item }) {
           <RecipeList
             db={db}
             state={state}
-            recipes={usedIn}
+            pick={r => r.input.some(i => i.item === item.itemName)}
             emptyText="Not an ingredient in any recipe."
           />
         </section>

@@ -126,18 +126,12 @@ function orderSources(sources: LoadedSource[]): LoadedSource[] {
       return
     }
     visited.add(source.record.name)
-    for (const dep of source.requires) {
+    for (const dep of [...source.requires, ...source.includes]) {
       const target = byName.get(dep)
       if (target) {
         visit(target)
-      } else {
+      } else if (source.requires.includes(dep)) {
         warn(source.dir, `requires missing source ${dep}`)
-      }
-    }
-    for (const dep of source.includes) {
-      const target = byName.get(dep)
-      if (target) {
-        visit(target)
       }
     }
     ordered.push(source)
@@ -181,24 +175,13 @@ function findAsset(assetPath: string): Asset | undefined {
   return assetIndex.get(assetPath.toLowerCase())
 }
 
-function assetFile(file: string): string {
-  const asset = findAsset(file)
-  if (!asset) {
-    throw new Error(`no such asset: ${file}`)
-  }
-  return asset.file
-}
-
 // Indexed assets whose lowercased path satisfies the predicate, sorted by
 // path so output is deterministic regardless of directory walk order.
 function assetsMatching(predicate: (lowerPath: string) => boolean): Asset[] {
-  const matches: Asset[] = []
-  for (const [key, asset] of assetIndex) {
-    if (predicate(key)) {
-      matches.push(asset)
-    }
-  }
-  return matches.sort((a, b) => a.path.localeCompare(b.path))
+  return [...assetIndex]
+    .filter(([key]) => predicate(key))
+    .map(([, asset]) => asset)
+    .sort((a, b) => a.path.localeCompare(b.path))
 }
 
 // Starbound asset files are JSON with C-style comments, the occasional
@@ -231,7 +214,11 @@ function escapeControlCharsInStrings(text: string): string {
 
 // Throws on malformed JSON; per-file callers go through tryParse.
 function readAssetJson(file: string): any {
-  return parseAssetJson(readFileSync(assetFile(file), 'utf8'))
+  const asset = findAsset(file)
+  if (!asset) {
+    throw new Error(`no such asset: ${file}`)
+  }
+  return parseAssetJson(readFileSync(asset.file, 'utf8'))
 }
 
 // Runs one per-file step, turning a parse failure into a warning.
@@ -279,10 +266,10 @@ function resolveAssetPath(ref: string, file: string): string {
 // inventoryIcon is a path string, possibly with a ":frame" suffix, or an
 // array of drawables each with an "image" key. Frame suffixes are dropped;
 // cropping sprite sheets to the named frame is not handled yet. Returns the
-// icon's asset path as the winning source spells it (lookups are
-// case-insensitive, e.g. "icons.png" in a config and "Icons.png" on disk),
-// or undefined with a warning if no source has it.
-function resolveIcon(value: unknown, file: string): string | undefined {
+// icon's indexed asset (lookups are case-insensitive, e.g. "icons.png" in a
+// config and "Icons.png" on disk), or undefined with a warning if no source
+// has it.
+function resolveIcon(value: unknown, file: string): Asset | undefined {
   let ref: unknown = value
   if (Array.isArray(value)) {
     ref = value.at(-1)?.image
@@ -299,16 +286,16 @@ function resolveIcon(value: unknown, file: string): string | undefined {
   if (!found) {
     warn(file, `icon not found: ${assetPath}`)
   }
-  return found?.path
+  return found
 }
 
-function copyIcon(iconPath: string) {
-  const dest = join(outDir, 'assets', iconPath)
+function copyIcon(icon: Asset) {
+  const dest = join(outDir, 'assets', icon.path)
   if (existsSync(dest)) {
     return
   }
   mkdirSync(dirname(dest), { recursive: true })
-  copyFileSync(assetFile(iconPath), dest)
+  copyFileSync(icon.file, dest)
 }
 
 // learnBlueprintsOnPickup entries are item descriptors: either a bare item
@@ -392,9 +379,9 @@ function buildItem(
 
   const shortdescription = optional<string>(config.shortdescription, 'string')
   const cleanName = shortdescription && stripColorCodes(shortdescription)
-  const inventoryIcon = resolveIcon(config.inventoryIcon, file)
-  if (inventoryIcon) {
-    copyIcon(inventoryIcon)
+  const icon = resolveIcon(config.inventoryIcon, file)
+  if (icon) {
+    copyIcon(icon)
   }
 
   const item: Item = {
@@ -406,7 +393,7 @@ function buildItem(
     description: optional<string>(config.description, 'string'),
     category: optional<string>(config.category, 'string'),
     rarity: normalizeRarity(config.rarity, file),
-    inventoryIcon,
+    inventoryIcon: icon?.path,
     price: optional<number>(config.price, 'number'),
     maxStack: optional<number>(config.maxStack, 'number'),
     level: optional<number>(config.level, 'number'),

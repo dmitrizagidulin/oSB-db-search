@@ -20,6 +20,10 @@ export function emptyFilters(): Filters {
   return { type: [], category: [], rarity: [], race: [], source: [] }
 }
 
+export function emptyQuery(): SearchQuery {
+  return { q: '', filters: emptyFilters(), sort: 'relevance' }
+}
+
 // A non-default sort counts as a query, so the landing page never hides
 // a sort control that is still in effect.
 export function isBlank(query: SearchQuery): boolean {
@@ -38,7 +42,7 @@ function safeDecode(s: string): string {
   }
 }
 
-export function parseHash(hash: string): Route {
+function parseHash(hash: string): Route {
   const path = hash.replace(/^#\/?/, '')
   if (path.startsWith('item/')) {
     return {
@@ -62,7 +66,7 @@ export function parseHash(hash: string): Route {
   }
 }
 
-export function toHash(route: Route): string {
+function toHash(route: Route): string {
   if (route.page === 'item') {
     return `#/item/${encodeURIComponent(route.name)}`
   }
@@ -93,14 +97,14 @@ export function itemHash(name: string): string {
 
 // location.hash is percent-decoded in Firefox, so read the raw form from
 // the full URL to keep parsing consistent across browsers.
-export function currentHash(): string {
+function currentHash(): string {
   const i = location.href.indexOf('#')
   return i === -1 ? '' : location.href.slice(i)
 }
 
 // Replaces the current history entry, for keystroke-driven changes.
-export function replaceRoute(route: Route): void {
-  const hash = toHash(route)
+export function replaceSearch(query: SearchQuery): void {
+  const hash = searchHash(query)
   if (hash !== currentHash()) {
     location.replace(hash)
   }

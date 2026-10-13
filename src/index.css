@@ -345,6 +345,13 @@ h2 {
   align-items: center;
   margin: 0.25rem 0 0.5rem;
 }
+.detail-sub code {
+  font-size: 1.05rem;
+  color: var(--fg);
+  background: var(--border);
+  border-radius: 999px;
+  padding: 0.15em 0.7em;
+}
 .badge {
   border: 1px solid currentColor;
   border-radius: 999px;

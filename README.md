@@ -18,6 +18,29 @@ pnpm dev
 
 `pnpm test` runs the autofix, format, lint and typecheck steps.
 
+## Generating the data
+
+The app reads static tables from `public/data/`, produced by
+`scripts/generate.ts` from an unpacked OpenStarbound assets directory:
+
+```shell
+pnpm generate /path/to/unpacked/assets
+```
+
+The script walks every item asset the engine recognizes (`.item`, `.consumable`,
+`.object` and the rest) plus `recipes/**/*.recipe`, and writes:
+
+- `public/data/items.json` and `public/data/recipes.json`, the tables below.
+- `public/data/raw/<itemName>.json`, the unmodified asset JSON per item, for the
+  `/spawnitem` generator.
+- `public/assets/<asset path>`, the icon PNGs, keeping their asset-relative
+  paths.
+
+Asset files are JSON with comments and trailing commas, so the script parses
+them with `comment-json`. Duplicate item names and unresolved icons or recipe
+references are reported as warnings. Sprite-sheet icons with a frame suffix are
+copied whole; cropping to the named frame is not handled yet.
+
 ## Item Schema
 
 Sketch of the core item record the app searches over. Field names follow the

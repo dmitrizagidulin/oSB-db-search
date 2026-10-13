@@ -1,0 +1,295 @@
+#!/usr/bin/env node
+// Walks an unpacked OpenStarbound assets directory and writes the item and
+// recipe tables the app searches over, plus the icon PNGs they reference.
+//
+//   node scripts/generate.ts <unpacked-assets-dir>
+//
+// Outputs:
+//   public/data/items.json      Item[]
+//   public/data/recipes.json    Recipe[]
+//   public/data/raw/<itemName>.json   the unmodified asset JSON per item
+//   public/assets/<asset path>  icon PNGs, keeping their asset-relative path
+
+import { globSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync } from 'node:fs'
+import { dirname, join, posix } from 'node:path'
+import { parse } from 'comment-json'
+import type { Item, Rarity, Recipe } from '../src/schema.ts'
+
+// Item asset extensions the engine's ItemDatabase recognizes, plus .object.
+const ITEM_EXTENSIONS = [
+  'item',
+  'liqitem',
+  'matitem',
+  'miningtool',
+  'flashlight',
+  'wiretool',
+  'beamaxe',
+  'tillingtool',
+  'painttool',
+  'harvestingtool',
+  'head',
+  'chest',
+  'legs',
+  'back',
+  'currency',
+  'consumable',
+  'blueprint',
+  'inspectiontool',
+  'instrument',
+  'thrownitem',
+  'unlock',
+  'activeitem',
+  'augment',
+  'object'
+]
+
+const WIKI_BASE = 'https://starbounder.org/'
+
+const assetsDir = process.argv[2]
+if (!assetsDir) {
+  console.error('usage: node scripts/generate.ts <unpacked-assets-dir>')
+  process.exit(1)
+}
+const outDir = 'public'
+const warnings: string[] = []
+
+function warn(file: string, message: string) {
+  warnings.push(`${file}: ${message}`)
+}
+
+// Starbound asset files are JSON with C-style comments and the occasional
+// trailing comma, so plain JSON.parse rejects many of them.
+function readAssetJson(file: string): any {
+  return parse(readFileSync(join(assetsDir, file), 'utf8'), undefined, true)
+}
+
+// Strips the game's inline color codes, e.g. "^orange;Legendary^reset;".
+function stripColorCodes(text: string): string {
+  return text.replace(/\^[^;^]*;/g, '')
+}
+
+function normalizeRarity(value: unknown, file: string): Rarity {
+  const text = typeof value === 'string' ? value.toLowerCase() : 'common'
+  const known: Record<string, Rarity> = {
+    common: 'Common',
+    uncommon: 'Uncommon',
+    rare: 'Rare',
+    legendary: 'Legendary',
+    essential: 'Essential'
+  }
+  const rarity = known[text]
+  if (!rarity) {
+    warn(file, `unknown rarity ${JSON.stringify(value)}, using Common`)
+    return 'Common'
+  }
+  return rarity
+}
+
+// Resolves an asset path the way the engine does: absolute paths are
+// relative to the assets root, anything else is relative to the file's
+// directory. Returns the asset-relative path without a leading slash.
+function resolveAssetPath(ref: string, file: string): string {
+  if (ref.startsWith('/')) {
+    return ref.slice(1)
+  }
+  return posix.join(posix.dirname(file), ref)
+}
+
+// inventoryIcon is a path string, possibly with a ":frame" suffix, or an
+// array of drawables each with an "image" key. Frame suffixes are dropped;
+// cropping sprite sheets to the named frame is not handled yet.
+function resolveIcon(value: unknown, file: string): string | undefined {
+  let ref: unknown = value
+  if (Array.isArray(value)) {
+    ref = value.at(-1)?.image
+  }
+  if (typeof ref !== 'string') {
+    if (value !== undefined) {
+      warn(file, 'unrecognized inventoryIcon shape')
+    }
+    return undefined
+  }
+  const [path] = ref.split(':')
+  return resolveAssetPath(path, file)
+}
+
+function copyIcon(iconPath: string, file: string) {
+  const src = join(assetsDir, iconPath)
+  const dest = join(outDir, 'assets', iconPath)
+  if (existsSync(dest)) {
+    return
+  }
+  if (!existsSync(src)) {
+    warn(file, `icon not found: ${iconPath}`)
+    return
+  }
+  mkdirSync(dirname(dest), { recursive: true })
+  copyFileSync(src, dest)
+}
+
+// learnBlueprintsOnPickup entries are item descriptors: either a bare item
+// name or an object with a "name" key.
+function descriptorNames(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value
+    .map(entry => (typeof entry === 'string' ? entry : entry?.name))
+    .filter((name): name is string => typeof name === 'string')
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter(v => typeof v === 'string') : []
+}
+
+function optional<T>(value: unknown, type: 'string' | 'number' | 'boolean') {
+  return typeof value === type ? (value as T) : undefined
+}
+
+function wikiUrl(shortdescription: string | undefined): string | undefined {
+  if (!shortdescription) {
+    return undefined
+  }
+  return WIKI_BASE + encodeURIComponent(shortdescription.replace(/ /g, '_'))
+}
+
+function parseRecipe(file: string): Recipe | undefined {
+  const config = readAssetJson(file)
+  if (typeof config?.output?.item !== 'string') {
+    warn(file, 'recipe has no output item')
+    return undefined
+  }
+  return {
+    id: file,
+    input: (config.input ?? []).map((d: any) => ({
+      item: d.item,
+      count: d.count ?? 1
+    })),
+    output: { item: config.output.item, count: config.output.count ?? 1 },
+    currencyInputs: config.currencyInputs ?? {},
+    groups: stringList(config.groups),
+    duration: optional<number>(config.duration, 'number')
+  }
+}
+
+function parseItem(file: string): { item: Item; raw: any } | undefined {
+  const config = readAssetJson(file)
+  const type = posix.extname(file).slice(1)
+  const isObject = type === 'object'
+  const itemName = isObject ? config?.objectName : config?.itemName
+  if (typeof itemName !== 'string') {
+    warn(file, 'missing itemName')
+    return undefined
+  }
+
+  const shortdescription = optional<string>(config.shortdescription, 'string')
+  const cleanName = shortdescription && stripColorCodes(shortdescription)
+  const inventoryIcon = resolveIcon(config.inventoryIcon, file)
+  if (inventoryIcon) {
+    copyIcon(inventoryIcon, file)
+  }
+
+  const item: Item = {
+    itemName,
+    type,
+    sourceFile: file,
+    shortdescription: cleanName,
+    description: optional<string>(config.description, 'string'),
+    category: optional<string>(config.category, 'string'),
+    rarity: normalizeRarity(config.rarity, file),
+    inventoryIcon,
+    price: optional<number>(config.price, 'number'),
+    maxStack: optional<number>(config.maxStack, 'number'),
+    level: optional<number>(config.level, 'number'),
+    twoHanded: optional<boolean>(config.twoHanded, 'boolean'),
+    tooltipKind: optional<string>(config.tooltipKind, 'string'),
+    itemTags: stringList(config.itemTags),
+    learnBlueprintsOnPickup: descriptorNames(config.learnBlueprintsOnPickup),
+    collectablesOnPickup: config.collectablesOnPickup ?? {},
+    colonyTags: stringList(config.colonyTags),
+    craftedFrom: [],
+    usedIn: [],
+    wikiUrl: wikiUrl(cleanName)
+  }
+
+  if (isObject) {
+    // Defaults follow the engine's ObjectDatabase: objects are scannable
+    // unless they say otherwise, and printable defaults to scannable.
+    const scannable = config.scannable ?? true
+    item.objectType = config.objectType ?? 'object'
+    item.race = config.race ?? 'generic'
+    item.scannable = scannable
+    item.printable = config.printable ?? scannable
+    item.tooltipKind ??= 'object'
+  }
+
+  return { item, raw: config }
+}
+
+function main() {
+  const recipes: Recipe[] = []
+  for (const file of globSync('recipes/**/*.recipe', { cwd: assetsDir })) {
+    const recipe = parseRecipe(file)
+    if (recipe) {
+      recipes.push(recipe)
+    }
+  }
+
+  const items = new Map<string, Item>()
+  const rawDir = join(outDir, 'data', 'raw')
+  mkdirSync(rawDir, { recursive: true })
+  const pattern = `**/*.{${ITEM_EXTENSIONS.join(',')}}`
+  for (const file of globSync(pattern, { cwd: assetsDir })) {
+    const parsed = parseItem(file)
+    if (!parsed) {
+      continue
+    }
+    const { item, raw } = parsed
+    if (items.has(item.itemName)) {
+      warn(file, `duplicate itemName ${item.itemName}, keeping the first`)
+      continue
+    }
+    items.set(item.itemName, item)
+    writeFileSync(join(rawDir, `${item.itemName}.json`), JSON.stringify(raw))
+  }
+
+  // Derive the per-item recipe links.
+  for (const recipe of recipes) {
+    const output = items.get(recipe.output.item)
+    if (!output) {
+      warn(recipe.id, `output ${recipe.output.item} is not a known item`)
+      continue
+    }
+    for (const { item: inputName } of recipe.input) {
+      const input = items.get(inputName)
+      if (!input) {
+        warn(recipe.id, `input ${inputName} is not a known item`)
+        continue
+      }
+      pushUnique(output.craftedFrom, inputName)
+      pushUnique(input.usedIn, output.itemName)
+    }
+  }
+
+  const sorted = [...items.values()].sort((a, b) =>
+    a.itemName.localeCompare(b.itemName)
+  )
+  writeFileSync(join(outDir, 'data', 'items.json'), JSON.stringify(sorted))
+  writeFileSync(join(outDir, 'data', 'recipes.json'), JSON.stringify(recipes))
+
+  for (const line of warnings) {
+    console.warn(line)
+  }
+  console.log(
+    `${sorted.length} items, ${recipes.length} recipes, ${warnings.length} warnings`
+  )
+}
+
+function pushUnique(list: string[], value: string) {
+  if (!list.includes(value)) {
+    list.push(value)
+  }
+}
+
+main()

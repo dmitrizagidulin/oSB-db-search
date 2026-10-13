@@ -7,3 +7,6 @@
   into the test script.
 - Item schema sketch in the README, with fields drawn from the engine source and
   the related projects.
+- Recipe table sketch in the README.
+- `scripts/generate.ts` builds the item and recipe tables, raw item JSON and
+  icons from an unpacked assets directory. Record types live in `src/schema.ts`.

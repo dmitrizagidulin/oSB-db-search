@@ -21,6 +21,9 @@ const collator = new Intl.Collator()
 
 const PAGE = 60
 
+// Always shown on the landing page.
+const FEATURED = 'perfectlygenericitem'
+
 const FACET_LABELS: Record<FacetKey, string> = {
   type: 'Type',
   category: 'Category',
@@ -144,6 +147,8 @@ export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
     [db]
   )
 
+  const featured = db.byName.get(FEATURED)
+
   const chips = (facet: keyof typeof chipCounts) =>
     chipCounts[facet].map(([v, n]) => (
       <a
@@ -186,6 +191,14 @@ export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
             Type to search {db.items.length} items, or browse by type, category,
             rarity or race. Press <kbd>/</kbd> to focus the search box.
           </p>
+          {featured && (
+            <>
+              <h2>Featured</h2>
+              <div className="grid featured">
+                <ItemCard item={featured} />
+              </div>
+            </>
+          )}
           <h2>Type</h2>
           <div className="chips">{chips('type')}</div>
           <h2>Category</h2>

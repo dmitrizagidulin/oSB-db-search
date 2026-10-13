@@ -195,6 +195,10 @@ h2 {
   text-decoration: none;
 }
 
+.featured {
+  max-width: 24rem;
+}
+
 .foot {
   margin-top: 2.5rem;
   color: var(--muted);

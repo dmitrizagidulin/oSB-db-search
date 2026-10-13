@@ -21,14 +21,55 @@ pnpm dev
 ## Generating the data
 
 The app reads static tables from `public/data/`, produced by
-`scripts/generate.ts` from an unpacked OpenStarbound assets directory:
+`scripts/generate.ts` from an unpacked assets directory.
+
+### Unpacking the game assets
+
+The game ships its assets as a single `assets/packed.pak` inside the Starbound
+install directory. Both the vanilla install and an OpenStarbound build include
+an `asset_unpacker` tool next to the game binary. It takes the pak file and an
+output directory. Pick a directory outside the game install, since unpacking
+into the live `assets` folder breaks the game.
+
+Linux (Steam installs to `~/.steam/steam/steamapps/common/Starbound`, or
+`~/.local/share/Steam/steamapps/common/Starbound`):
 
 ```shell
-pnpm generate /path/to/unpacked/assets
+cd ~/.steam/steam/steamapps/common/Starbound
+./linux/asset_unpacker assets/packed.pak ~/starbound-unpacked
+```
+
+macOS:
+
+```shell
+cd ~/Library/Application\ Support/Steam/steamapps/common/Starbound
+./osx/asset_unpacker assets/packed.pak ~/starbound-unpacked
+```
+
+Windows, from PowerShell or Command Prompt:
+
+```powershell
+cd "C:\Program Files (x86)\Steam\steamapps\common\Starbound"
+.\win32\asset_unpacker.exe assets\packed.pak C:\starbound-unpacked
+```
+
+An OpenStarbound build tree has the tool at `dist/asset_unpacker` instead, and
+it accepts the same arguments.
+
+Unpacking the vanilla pak takes a few seconds and produces about 1 GB of files.
+OpenStarbound's own `opensb.pak` adds no items, objects or recipes, so the
+vanilla pak is enough. Mod paks can be unpacked into the same directory
+afterwards to overlay their files, though `.patch` files are not applied.
+
+### Running the generator
+
+```shell
+pnpm generate /path/to/unpacked
 ```
 
 The script walks every item asset the engine recognizes (`.item`, `.consumable`,
-`.object` and the rest) plus `recipes/**/*.recipe`, and writes:
+`.object` and the rest), the `.codex` files the engine turns into items itself,
+and `recipes/**/*.recipe`. It writes:
 
 - `public/data/items.json` and `public/data/recipes.json`, the tables below.
 - `public/data/raw/<itemName>.json`, the unmodified asset JSON per item, for the
@@ -36,10 +77,12 @@ The script walks every item asset the engine recognizes (`.item`, `.consumable`,
 - `public/assets/<asset path>`, the icon PNGs, keeping their asset-relative
   paths.
 
-Asset files are JSON with comments and trailing commas, so the script parses
-them with `comment-json`. Duplicate item names and unresolved icons or recipe
-references are reported as warnings. Sprite-sheet icons with a frame suffix are
-copied whole; cropping to the named frame is not handled yet.
+Asset files are JSON with comments, trailing commas, and raw newlines inside
+strings, so the script normalizes them before parsing with `comment-json`. Asset
+paths are resolved case-insensitively, as the engine does. Duplicate item names,
+parse failures and unresolved icons or recipe references are reported as
+warnings. Sprite-sheet icons with a frame suffix are copied whole; cropping to
+the named frame is not handled yet.
 
 ## Item Schema
 

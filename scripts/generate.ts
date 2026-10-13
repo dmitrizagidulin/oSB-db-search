@@ -10,13 +10,21 @@
 //   public/data/raw/<itemName>.json   the unmodified asset JSON per item
 //   public/assets/<asset path>  icon PNGs, keeping their asset-relative path
 
-import { globSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { copyFileSync, existsSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  globSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync
+} from 'node:fs'
 import { dirname, join, posix } from 'node:path'
 import { parse } from 'comment-json'
 import type { Item, Rarity, Recipe } from '../src/schema.ts'
 
-// Item asset extensions the engine's ItemDatabase recognizes, plus .object.
+// Item asset extensions the engine's ItemDatabase recognizes, plus .object
+// and .codex, which the engine turns into items itself.
 const ITEM_EXTENSIONS = [
   'item',
   'liqitem',
@@ -41,7 +49,8 @@ const ITEM_EXTENSIONS = [
   'unlock',
   'activeitem',
   'augment',
-  'object'
+  'object',
+  'codex'
 ]
 
 const WIKI_BASE = 'https://starbounder.org/'
@@ -58,10 +67,48 @@ function warn(file: string, message: string) {
   warnings.push(`${file}: ${message}`)
 }
 
-// Starbound asset files are JSON with C-style comments and the occasional
-// trailing comma, so plain JSON.parse rejects many of them.
+// Starbound asset files are JSON with C-style comments, the occasional
+// trailing comma, and (in codex files) raw newlines and tabs inside string
+// literals. comment-json handles the first two; this escapes the control
+// characters inside strings so it can handle the third.
+const CONTROL_ESCAPES: Record<string, string> = {
+  '\n': '\\n',
+  '\t': '\\t',
+  '\r': ''
+}
+
+function escapeControlCharsInStrings(text: string): string {
+  let out = ''
+  let inString = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (inString && ch === '\\') {
+      out += ch + (text[i + 1] ?? '')
+      i++
+      continue
+    }
+    if (ch === '"') {
+      inString = !inString
+    }
+    out += inString ? (CONTROL_ESCAPES[ch] ?? ch) : ch
+  }
+  return out
+}
+
+// Throws on malformed JSON; per-file callers go through tryParse.
 function readAssetJson(file: string): any {
-  return parse(readFileSync(join(assetsDir, file), 'utf8'), undefined, true)
+  const text = readFileSync(join(assetsDir, file), 'utf8')
+  return parse(escapeControlCharsInStrings(text), undefined, true)
+}
+
+// Runs one per-file step, turning a parse failure into a warning.
+function tryParse<T>(file: string, step: () => T): T | undefined {
+  try {
+    return step()
+  } catch (err) {
+    warn(file, `parse error: ${(err as Error).message}`)
+    return undefined
+  }
 }
 
 // Strips the game's inline color codes, e.g. "^orange;Legendary^reset;".
@@ -96,9 +143,43 @@ function resolveAssetPath(ref: string, file: string): string {
   return posix.join(posix.dirname(file), ref)
 }
 
+// The engine looks assets up case-insensitively, and the vanilla files rely
+// on that (e.g. "icons.png" in the config, "Icons.png" on disk). Resolves an
+// asset-relative path to the name actually on disk, one segment at a time.
+const dirCache = new Map<string, Map<string, string>>()
+
+function listDir(relative: string): Map<string, string> {
+  let entries = dirCache.get(relative)
+  if (!entries) {
+    let names: string[] = []
+    try {
+      names = readdirSync(join(assetsDir, relative))
+    } catch {
+      // Not a directory: every lookup under it misses.
+    }
+    entries = new Map(names.map(e => [e.toLowerCase(), e]))
+    dirCache.set(relative, entries)
+  }
+  return entries
+}
+
+function findAsset(assetPath: string): string | undefined {
+  let resolved = ''
+  for (const segment of assetPath.split('/')) {
+    const entries = listDir(resolved)
+    const actual = entries.get(segment.toLowerCase())
+    if (!actual) {
+      return undefined
+    }
+    resolved = resolved ? `${resolved}/${actual}` : actual
+  }
+  return resolved
+}
+
 // inventoryIcon is a path string, possibly with a ":frame" suffix, or an
 // array of drawables each with an "image" key. Frame suffixes are dropped;
-// cropping sprite sheets to the named frame is not handled yet.
+// cropping sprite sheets to the named frame is not handled yet. Returns the
+// icon's on-disk asset path, or undefined (with a warning) if unresolvable.
 function resolveIcon(value: unknown, file: string): string | undefined {
   let ref: unknown = value
   if (Array.isArray(value)) {
@@ -111,21 +192,21 @@ function resolveIcon(value: unknown, file: string): string | undefined {
     return undefined
   }
   const [path] = ref.split(':')
-  return resolveAssetPath(path, file)
+  const assetPath = resolveAssetPath(path, file)
+  const found = findAsset(assetPath)
+  if (!found) {
+    warn(file, `icon not found: ${assetPath}`)
+  }
+  return found
 }
 
-function copyIcon(iconPath: string, file: string) {
-  const src = join(assetsDir, iconPath)
+function copyIcon(iconPath: string) {
   const dest = join(outDir, 'assets', iconPath)
   if (existsSync(dest)) {
     return
   }
-  if (!existsSync(src)) {
-    warn(file, `icon not found: ${iconPath}`)
-    return
-  }
   mkdirSync(dirname(dest), { recursive: true })
-  copyFileSync(src, dest)
+  copyFileSync(join(assetsDir, iconPath), dest)
 }
 
 // learnBlueprintsOnPickup entries are item descriptors: either a bare item
@@ -173,11 +254,34 @@ function parseRecipe(file: string): Recipe | undefined {
   }
 }
 
-function parseItem(file: string): { item: Item; raw: any } | undefined {
+// Reads an item asset into the common item config shape. Objects name
+// themselves with objectName. Codex items are not asset files of their own:
+// the engine builds one item per .codex file, named "<id>-codex", from
+// codex.config's defaultItemConfig merged with the codex's own itemConfig.
+function loadItemConfig(file: string, type: string, codexDefaults: any): any {
   const config = readAssetJson(file)
-  const type = posix.extname(file).slice(1)
-  const isObject = type === 'object'
-  const itemName = isObject ? config?.objectName : config?.itemName
+  if (type === 'codex') {
+    return {
+      ...codexDefaults,
+      ...config.itemConfig,
+      itemName: `${config.id}-codex`,
+      shortdescription: config.title,
+      description: config.description,
+      inventoryIcon: config.icon
+    }
+  }
+  if (type === 'object') {
+    return { ...config, itemName: config.objectName }
+  }
+  return config
+}
+
+function buildItem(
+  file: string,
+  type: string,
+  config: any
+): { item: Item; raw: any } | undefined {
+  const itemName = config?.itemName
   if (typeof itemName !== 'string') {
     warn(file, 'missing itemName')
     return undefined
@@ -187,7 +291,7 @@ function parseItem(file: string): { item: Item; raw: any } | undefined {
   const cleanName = shortdescription && stripColorCodes(shortdescription)
   const inventoryIcon = resolveIcon(config.inventoryIcon, file)
   if (inventoryIcon) {
-    copyIcon(inventoryIcon, file)
+    copyIcon(inventoryIcon)
   }
 
   const item: Item = {
@@ -213,7 +317,7 @@ function parseItem(file: string): { item: Item; raw: any } | undefined {
     wikiUrl: wikiUrl(cleanName)
   }
 
-  if (isObject) {
+  if (type === 'object') {
     // Defaults follow the engine's ObjectDatabase: objects are scannable
     // unless they say otherwise, and printable defaults to scannable.
     const scannable = config.scannable ?? true
@@ -230,7 +334,7 @@ function parseItem(file: string): { item: Item; raw: any } | undefined {
 function main() {
   const recipes: Recipe[] = []
   for (const file of globSync('recipes/**/*.recipe', { cwd: assetsDir })) {
-    const recipe = parseRecipe(file)
+    const recipe = tryParse(file, () => parseRecipe(file))
     if (recipe) {
       recipes.push(recipe)
     }
@@ -239,9 +343,13 @@ function main() {
   const items = new Map<string, Item>()
   const rawDir = join(outDir, 'data', 'raw')
   mkdirSync(rawDir, { recursive: true })
+  const codexDefaults = readAssetJson('codex.config').defaultItemConfig ?? {}
   const pattern = `**/*.{${ITEM_EXTENSIONS.join(',')}}`
   for (const file of globSync(pattern, { cwd: assetsDir })) {
-    const parsed = parseItem(file)
+    const type = posix.extname(file).slice(1)
+    const parsed = tryParse(file, () =>
+      buildItem(file, type, loadItemConfig(file, type, codexDefaults))
+    )
     if (!parsed) {
       continue
     }

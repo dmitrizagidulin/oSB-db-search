@@ -10,3 +10,8 @@
 - Recipe table sketch in the README.
 - `scripts/generate.ts` builds the item and recipe tables, raw item JSON and
   icons from an unpacked assets directory. Record types live in `src/schema.ts`.
+- README instructions for unpacking the game assets.
+- Generator builds items from `.codex` files, the way the engine does.
+- Generator resolves asset paths case-insensitively, matching the engine.
+- Generator escapes raw newlines and tabs inside asset JSON strings before
+  parsing, and reports parse failures as warnings instead of aborting.

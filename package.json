@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "generate": "node scripts/generate.ts",
+    "unpack": "node scripts/unpack.ts",
     "fix": "oxlint --fix src scripts && pnpm run format",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"scripts/**/*.ts\" \"*.md\" \"*.json\"",
     "lint": "oxlint src scripts",

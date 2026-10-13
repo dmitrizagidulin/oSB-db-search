@@ -3,9 +3,20 @@
 
 export type Rarity = 'Common' | 'Uncommon' | 'Rare' | 'Legendary' | 'Essential'
 
+// One asset source (an unpacked pak), identified by its _metadata name.
+// sources.json lists them in engine load order.
+export interface Source {
+  name: string
+  friendlyName?: string
+  version?: string
+  priority: number
+}
+
 export interface Item {
   itemName: string
   type: string
+  // Name of the source that supplies the defining file.
+  source: string
   sourceFile: string
   shortdescription?: string
   description?: string
@@ -32,6 +43,7 @@ export interface Item {
 
 export interface Recipe {
   id: string
+  source: string
   input: { item: string; count: number }[]
   output: { item: string; count: number }
   currencyInputs: Record<string, number>

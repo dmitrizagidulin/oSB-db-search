@@ -21,46 +21,49 @@ pnpm dev
 ## Generating the data
 
 The app reads static tables from `public/data/`, produced by
-`scripts/generate.ts` from an unpacked assets directory.
+`scripts/generate.ts` from unpacked asset sources.
 
 ### Unpacking the game assets
 
-The game ships its assets as a single `assets/packed.pak` inside the Starbound
-install directory. Both the vanilla install and an OpenStarbound build include
-an `asset_unpacker` tool next to the game binary. It takes the pak file and an
-output directory. The examples below unpack into `data/unpacked/` in this repo,
-which is git-ignored and is where the generator looks by default. Never unpack
-into the game's own `assets` folder, since that breaks the game.
+The game ships its assets as paks: `assets/packed.pak` in the Starbound install
+directory, `assets/opensb.pak` next to it in an OpenStarbound install, and one
+pak per mod under `mods/`. Each pak is an asset source. The generator reads them
+from `data/sources/` in this repo, one subdirectory per pak, which is
+git-ignored.
 
-Linux (Steam installs to `~/.steam/steam/steamapps/common/Starbound`, or
-`~/.local/share/Steam/steamapps/common/Starbound`):
-
-```shell
-cd ~/.steam/steam/steamapps/common/Starbound
-./linux/asset_unpacker assets/packed.pak /path/to/oSB-db-search/data/unpacked
-```
-
-macOS:
+Both the vanilla install and an OpenStarbound build include an `asset_unpacker`
+tool next to the game binary. `pnpm unpack` runs it once per pak:
 
 ```shell
-cd ~/Library/Application\ Support/Steam/steamapps/common/Starbound
-./osx/asset_unpacker assets/packed.pak /path/to/oSB-db-search/data/unpacked
+pnpm unpack <asset_unpacker> <pak-or-directory>...
 ```
 
-Windows, from PowerShell or Command Prompt:
+A directory argument unpacks every pak directly inside it, which is the easy way
+to pull in a whole `mods/` folder. Each pak lands in `data/sources/<pak name>/`,
+replacing any earlier unpack of the same pak.
 
-```powershell
-cd "C:\Program Files (x86)\Steam\steamapps\common\Starbound"
-.\win32\asset_unpacker.exe assets\packed.pak C:\path\to\oSB-db-search\data\unpacked
+Where the tool and the paks live, by platform. Steam installs Starbound under
+`steamapps/common/Starbound`:
+
+- Linux: `~/.steam/steam/steamapps/common/Starbound` (or
+  `~/.local/share/Steam/...`), tool at `linux/asset_unpacker`.
+- macOS: `~/Library/Application Support/Steam/steamapps/common/Starbound`, tool
+  at `osx/asset_unpacker`.
+- Windows: `C:\Program Files (x86)\Steam\steamapps\common\Starbound`, tool at
+  `win32\asset_unpacker.exe`.
+- OpenStarbound build tree: tool at `dist/asset_unpacker`.
+
+For example, on Linux:
+
+```shell
+SB=~/.steam/steam/steamapps/common/Starbound
+pnpm unpack $SB/linux/asset_unpacker $SB/assets/packed.pak $SB/mods
 ```
-
-An OpenStarbound build tree has the tool at `dist/asset_unpacker` instead, and
-it accepts the same arguments.
 
 Unpacking the vanilla pak takes a few seconds and produces about 1 GB of files.
-OpenStarbound's own `opensb.pak` adds no items, objects or recipes, so the
-vanilla pak is enough. Mod paks can be unpacked into the same directory
-afterwards to overlay their files, though `.patch` files are not applied.
+It is the only required source. OpenStarbound's own `opensb.pak` adds no items,
+objects or recipes. Never unpack into the game's own `assets` folder, since that
+breaks the game.
 
 ### Running the generator
 
@@ -68,17 +71,30 @@ afterwards to overlay their files, though `.patch` files are not applied.
 pnpm generate
 ```
 
-The generator reads `data/unpacked/` by default. Pass a path to read another
-directory instead:
+The generator reads `data/sources/` by default. Pass a path to read another
+directory of sources instead:
 
 ```shell
-pnpm generate /path/to/unpacked
+pnpm generate /path/to/sources
 ```
+
+Sources are layered the way the engine layers them. Each pak's `_metadata` gives
+it a name, a priority and optional `requires` and `includes` lists. The
+generator orders sources by priority, breaks ties by name, moves every
+dependency ahead of the source that lists it, and then lets the last source to
+supply an asset path win. Asset paths are compared case-insensitively, as the
+engine does. Items and recipes record the name of the source that supplied their
+file, and `public/data/sources.json` lists the sources in load order.
+
+Mods that change existing files through `.patch` files are not applied yet. Such
+a mod shows up in `sources.json` but changes no item or recipe.
 
 The script walks every item asset the engine recognizes (`.item`, `.consumable`,
 `.object` and the rest), the `.codex` files the engine turns into items itself,
 and `recipes/**/*.recipe`. It writes:
 
+- `public/data/sources.json`, the loaded sources in load order, each with its
+  `name`, `friendlyName`, `version` and `priority` from `_metadata`.
 - `public/data/items.json` and `public/data/recipes.json`, the tables below.
 - `public/data/raw/<itemName>.json`, the unmodified asset JSON per item, for the
   `/spawnitem` generator.
@@ -86,11 +102,10 @@ and `recipes/**/*.recipe`. It writes:
   paths.
 
 Asset files are JSON with comments, trailing commas, and raw newlines inside
-strings, so the script normalizes them before parsing with `comment-json`. Asset
-paths are resolved case-insensitively, as the engine does. Duplicate item names,
-parse failures and unresolved icons or recipe references are reported as
-warnings. Sprite-sheet icons with a frame suffix are copied whole; cropping to
-the named frame is not handled yet.
+strings, so the script normalizes them before parsing with `comment-json`.
+Duplicate item names, parse failures, missing `requires` sources and unresolved
+icons or recipe references are reported as warnings. Sprite-sheet icons with a
+frame suffix are copied whole; cropping to the named frame is not handled yet.
 
 ## Item Schema
 
@@ -105,6 +120,10 @@ guarantees it is unique across an install.
   // Source asset type, taken from the file extension: "consumable",
   // "object", "matitem", "sword", "head", and so on.
   "type": "string",
+  // Name of the asset source (pak) that supplies the defining file, from its
+  // _metadata: "base" for vanilla, "opensb_base" for OpenStarbound, or the
+  // mod's own name. See public/data/sources.json.
+  "source": "string",
   // Asset-relative path of the defining file,
   // e.g. "items/generic/food/tomatojuice.consumable".
   "sourceFile": "string",
@@ -174,6 +193,8 @@ per item matter. Field names follow the game's `.recipe` files.
 {
   // Generator-assigned, e.g. the asset-relative path of the .recipe file.
   "id": "string",
+  // Name of the asset source that supplies the .recipe file, as for items.
+  "source": "string",
   "input": [{ "item": "string", "count": "integer" }],
   "output": { "item": "string", "count": "integer" },
   // Currency costs, as a map of currency name to amount,

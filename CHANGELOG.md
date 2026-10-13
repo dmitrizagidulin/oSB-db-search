@@ -23,3 +23,9 @@
   parsing, and reports parse failures as warnings instead of aborting.
 - ROADMAP.md and archived-roadmap.md, following the isomorphic-lib-template item
   structure.
+- First UI iteration: search-first landing page with browse chips, results view
+  with facet filters (type, category, rarity, race, source), sort and paging,
+  and an item detail page with facts, tags, crafting recipes and usages. Hash
+  routing keeps query and filters in the URL. Search runs in the browser over
+  `items.json` with MiniSearch (prefix, fuzzy, field boosts). Recipes load on
+  the first detail view.

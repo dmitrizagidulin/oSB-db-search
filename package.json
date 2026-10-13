@@ -16,6 +16,7 @@
     "test": "pnpm run fix && pnpm run lint && pnpm run typecheck"
   },
   "dependencies": {
+    "minisearch": "^7.2.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

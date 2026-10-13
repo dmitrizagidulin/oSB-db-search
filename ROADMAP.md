@@ -1,6 +1,6 @@
 # oSB Item Search Roadmap (open items)
 
-nextAvailableId: 2
+nextAvailableId: 3
 
 Status as of 2026-10-13. Uses the formalized item structure shared with the
 isomorphic-lib-template and freewallet roadmaps.
@@ -97,3 +97,61 @@ found while indexing. `readAssetJson` then parses the base file and folds the
 patches over it before returning, so item and recipe parsing need no changes
 beyond the provenance field. Raw item JSON in `public/data/raw/` should be the
 patched result, since that is what the engine sees.
+
+### OSB-2: Crop sprite sheet icons to the named frame
+
+- status: todo
+- priority: high
+- labels: generator, icons
+- acceptance:
+  - [ ] An `inventoryIcon` with a `:frame` suffix (as a plain string or as the
+        last drawable's `image` in an array) is cropped to that frame's rect and
+        the cropped PNG is what `public/assets/` holds and the item record
+        points at. Icons without a suffix are copied whole, as today.
+  - [ ] The `.frames` file is found the way the engine finds it: in the image's
+        directory, `<image basename>.frames` first, then `default.frames`, then
+        the same two names in each parent directory up to the asset root.
+        Lookups go through the layered source index, so a mod can supply or
+        replace a frames file.
+  - [ ] Both frames shapes parse: `frameList` (name to `[x1, y1, x2, y2]`) and
+        `frameGrid` (`size`, `dimensions`, optional `begin`, optional `names`
+        rows; unnamed cells are numbered row-major from 0). `aliases` resolve to
+        a frame name, following alias chains.
+  - [ ] A missing frames file, unknown frame name, or rect outside the image is
+        reported as a warning naming the item file and the icon reference, and
+        the item keeps the whole sheet so it still has an icon.
+  - [ ] Running the generator leaves every item that had a whole-sheet icon
+        before with a square icon of the frame's size; armor, codex, and
+        container icons in the search grid render at full card size.
+  - [ ] README "Running the generator" drops the "copied whole" caveat and
+        describes the cropping; CHANGELOG entry.
+
+Context: Armor and many object icons point at a sprite sheet with a frame
+suffix, for example `icons.png:chest` in `apextier1.chest`, where
+`items/armors/icons.frames` maps `chest` to the second 16x16 cell. The generator
+drops the suffix and copies the whole sheet, so about 770 items show a four-cell
+strip scaled down to the card icon size, and the search grid reads as rows of
+unreadable smudges for every armor set. The README already notes the gap; with
+the UI in place it is the most visible data defect.
+
+The engine's behavior to match is in the OpenStarbound source. Frames file
+discovery is in `source/base/StarAssets.cpp` around lines 1000-1015 (walk up
+from the image's directory, `<basename>.frames` before `default.frames` at each
+level). Parsing of `frameList`, `frameGrid` and `aliases` is in
+`parseFramesSpecification` in the same file, around lines 755-845. The crop
+itself is a plain rect copy, see `imageFrames` and `getRect` used from
+`source/game/StarImageMetadataDatabase.cpp` around line 175. Image directives
+that can follow the frame name (`?hueshift=...` and the like) are out of scope
+here; the generator keeps dropping them, and a later item can decide whether to
+apply them.
+
+Implementation sketch: `resolveIcon` in `scripts/generate.ts` already splits the
+reference on `:`; keep the frame name, look up the frames file through the
+existing asset index, compute the rect, and have `copyIcon` write a cropped PNG
+instead of copying. A small pure-JS PNG codec (for example `pngjs`) is enough,
+since icons are tiny and the generator runs offline. The cropped file needs a
+path that differs from the sheet's, so the sheet and several frames of it can
+coexist under `public/assets/`; that output path convention, and whether
+`inventoryIcon` in `items.json` keeps the engine's `path:frame` form or points
+at the cropped file, are wire-level choices that need the user's sign-off before
+coding.

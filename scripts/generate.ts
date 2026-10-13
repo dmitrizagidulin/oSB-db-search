@@ -2,7 +2,7 @@
 // Walks an unpacked OpenStarbound assets directory and writes the item and
 // recipe tables the app searches over, plus the icon PNGs they reference.
 //
-//   node scripts/generate.ts <unpacked-assets-dir>
+//   node scripts/generate.ts [unpacked-assets-dir]   (default: data/unpacked)
 //
 // Outputs:
 //   public/data/items.json      Item[]
@@ -55,9 +55,10 @@ const ITEM_EXTENSIONS = [
 
 const WIKI_BASE = 'https://starbounder.org/'
 
-const assetsDir = process.argv[2]
-if (!assetsDir) {
-  console.error('usage: node scripts/generate.ts <unpacked-assets-dir>')
+const assetsDir = process.argv[2] ?? 'data/unpacked'
+if (!existsSync(assetsDir)) {
+  console.error(`assets directory not found: ${assetsDir}`)
+  console.error('usage: node scripts/generate.ts [unpacked-assets-dir]')
   process.exit(1)
 }
 const outDir = 'public'

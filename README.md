@@ -28,29 +28,30 @@ The app reads static tables from `public/data/`, produced by
 The game ships its assets as a single `assets/packed.pak` inside the Starbound
 install directory. Both the vanilla install and an OpenStarbound build include
 an `asset_unpacker` tool next to the game binary. It takes the pak file and an
-output directory. Pick a directory outside the game install, since unpacking
-into the live `assets` folder breaks the game.
+output directory. The examples below unpack into `data/unpacked/` in this repo,
+which is git-ignored and is where the generator looks by default. Never unpack
+into the game's own `assets` folder, since that breaks the game.
 
 Linux (Steam installs to `~/.steam/steam/steamapps/common/Starbound`, or
 `~/.local/share/Steam/steamapps/common/Starbound`):
 
 ```shell
 cd ~/.steam/steam/steamapps/common/Starbound
-./linux/asset_unpacker assets/packed.pak ~/starbound-unpacked
+./linux/asset_unpacker assets/packed.pak /path/to/oSB-db-search/data/unpacked
 ```
 
 macOS:
 
 ```shell
 cd ~/Library/Application\ Support/Steam/steamapps/common/Starbound
-./osx/asset_unpacker assets/packed.pak ~/starbound-unpacked
+./osx/asset_unpacker assets/packed.pak /path/to/oSB-db-search/data/unpacked
 ```
 
 Windows, from PowerShell or Command Prompt:
 
 ```powershell
 cd "C:\Program Files (x86)\Steam\steamapps\common\Starbound"
-.\win32\asset_unpacker.exe assets\packed.pak C:\starbound-unpacked
+.\win32\asset_unpacker.exe assets\packed.pak C:\path\to\oSB-db-search\data\unpacked
 ```
 
 An OpenStarbound build tree has the tool at `dist/asset_unpacker` instead, and
@@ -62,6 +63,13 @@ vanilla pak is enough. Mod paks can be unpacked into the same directory
 afterwards to overlay their files, though `.patch` files are not applied.
 
 ### Running the generator
+
+```shell
+pnpm generate
+```
+
+The generator reads `data/unpacked/` by default. Pass a path to read another
+directory instead:
 
 ```shell
 pnpm generate /path/to/unpacked

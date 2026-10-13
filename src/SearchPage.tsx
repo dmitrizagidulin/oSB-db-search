@@ -137,6 +137,7 @@ export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
   const chipCounts = useMemo(
     () => ({
       type: countBy(db.items, 'type').slice(0, 12),
+      category: countBy(db.items, 'category').slice(0, 12),
       rarity: countBy(db.items, 'rarity').slice(0, 5),
       race: countBy(db.items, 'race').slice(0, 12)
     }),
@@ -182,11 +183,13 @@ export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
       {blank ? (
         <section className="hero">
           <p className="hint">
-            Type to search {db.items.length} items, or browse by type, rarity or
-            race. Press <kbd>/</kbd> to focus the search box.
+            Type to search {db.items.length} items, or browse by type, category,
+            rarity or race. Press <kbd>/</kbd> to focus the search box.
           </p>
           <h2>Type</h2>
           <div className="chips">{chips('type')}</div>
+          <h2>Category</h2>
+          <div className="chips">{chips('category')}</div>
           <h2>Rarity</h2>
           <div className="chips">{chips('rarity')}</div>
           <h2>Race</h2>

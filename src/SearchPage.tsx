@@ -19,8 +19,6 @@ import type { Item, Rarity } from './schema.ts'
 
 const collator = new Intl.Collator()
 
-const PAGE = 60
-
 // Always shown on the landing page.
 const FEATURED = 'perfectlygenericitem'
 
@@ -79,10 +77,6 @@ function sortItems(items: Item[], sort: SortKey): Item[] {
 export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
   const blank = isBlank(query)
   const inputRef = useRef<HTMLInputElement>(null)
-  // Page size resets whenever the query changes, without an effect.
-  const queryKey = searchHash(query)
-  const [paging, setPaging] = useState({ key: queryKey, shown: PAGE })
-  const shown = paging.key === queryKey ? paging.shown : PAGE
   // The input owns its text so the controlled value updates synchronously;
   // the hash catches up on the next hashchange. Adopt the route's text when
   // it changes from outside (back button, pasted link, chip click).
@@ -260,20 +254,9 @@ export function SearchPage({ db, query }: { db: Db; query: SearchQuery }) {
           </aside>
           <main className="grid">
             {results.length === 0 && <p className="empty">No items match.</p>}
-            {results.slice(0, shown).map(item => (
+            {results.map(item => (
               <ItemCard key={item.itemName} item={item} />
             ))}
-            {shown < results.length && (
-              <button
-                className="more"
-                onClick={() =>
-                  setPaging({ key: queryKey, shown: shown + PAGE })
-                }
-              >
-                Show {Math.min(PAGE, results.length - shown)} more of{' '}
-                {results.length - shown}
-              </button>
-            )}
           </main>
         </div>
       )}

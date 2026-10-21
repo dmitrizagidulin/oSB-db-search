@@ -305,18 +305,6 @@ h2 {
   overflow: hidden;
 }
 
-.more {
-  grid-column: 1 / -1;
-  justify-self: center;
-  font: inherit;
-  padding: 0.5rem 1.25rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--fg);
-  cursor: pointer;
-}
-
 /* Detail */
 
 .back {
